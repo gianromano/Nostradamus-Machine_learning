@@ -30,6 +30,8 @@ def load_data():
     if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file, sep=';', quotechar='"')
+            st.write("Datos cargados:")
+            st.write(df)
             return df
         except ValueError as e:
             st.error(f"Error al leer el archivo: {e}")
@@ -37,8 +39,6 @@ def load_data():
 
 # Función para limpiar datos
 def clean_data(df):
-    st.write("Datos cargados:")
-    st.write(df)
     st.write("Columnas disponibles:")
     selected_columns = st.multiselect("Selecciona las columnas a eliminar:", [""] +  df.columns.tolist())
     df = df.drop(columns=selected_columns, axis=1)
@@ -50,38 +50,44 @@ def select_target_column(df):
     target_column = st.selectbox("Elige la columna objetivo", [""] + list(df.columns))
     return target_column
 
-def ask_data_discretization():
-    option = st.radio("¿Desea discretizar los datos?", ("Sí", "No"))
-    return option == "Sí"
+def ask_discretization_or_one_hot_encoding():
+    option = st.selectbox("Elige método de transformación de datos", ["", "Discretizar", "One-Hot Encoding"])
+    return option
 
 def discretizing_data(df):
-    if ask_data_discretization():
-        # Convertir el ndarray a un DataFrame de Pandas
-        df_discretized = pd.DataFrame(df, columns=df.columns)
-        
-        # Iterar a través de todas las columnas excepto la última
-        for col in df_discretized:
-            if df_discretized[col].dtype == float or df_discretized[col].dtype == int:
-                df_discretized[col] = pd.cut(df_discretized[col], bins=5, labels=["low", "mid-low", "medium", "mid-high", "high"])
-        return df_discretized
-    else:
-        df_discretized = df
-        return df_discretized
+    df_discretized = df.copy()
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col].dtype):
+            df[col] = pd.cut(df[col], bins=5, labels=["low", "mid-low", "medium", "mid-high", "high"])
+    st.write(df_discretized)   
+    return df_discretized
 
-def target_features_discretized(df_discretized,target_column):
-    features_discretized = df_discretized.drop(columns=[target_column])
-    target_discretized = df_discretized[target_column]
-    
-    return features_discretized, target_discretized
-
-def split_data_discretized(features_discretized, target_discretized):
-    X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized = train_test_split(features_discretized, target_discretized, test_size=0.20, stratify=target_discretized, random_state=0)
-    return X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized
+def one_hot_encoder(df):
+    categorical_columns = [col for col in df.columns if df[col].dtype == 'object']
+    df_encoded = pd.get_dummies(df, columns=categorical_columns)
+    st.write(df_encoded)
+    return df_encoded
 
 def target_features(df, target_column):
     features = df.drop(columns=[target_column])
     target = df[target_column] 
     return features, target 
+
+def feature_selection(df):
+    corr = np.abs(df.corr())
+
+    # Set up mask for triangle representation
+    mask = np.zeros_like(corr, dtype=bool)
+    mask[np.triu_indices_from(mask)] = True
+
+    # Set up the matplotlib figure
+    f, ax = plt.subplots(figsize=(10, 10))
+    # Generate a custom diverging colormap
+    cmap = sns.diverging_palette(220, 10, as_cmap=True)
+    # Draw the heatmap with the mask and correct aspect ratio
+    sns.heatmap(corr, mask=mask, vmax=1, square=True, linewidths=.5, cbar_kws={"shrink": .5}, annot=corr, cmap=cmap)
+
+    st.pyplot(f)
     
 def split_data(features, target):
     X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.20, random_state=0)
@@ -180,77 +186,124 @@ def choose_hyperparameters_discrete(model):
         "Grid Search": "grid",
         "Random Search": "random"
     }
-    
-    hyperparam_option = st.selectbox("Elige una opción de búsqueda de hiperparámetros", list(hyperparam_options.keys()))
+
+    hyperparam_option = st.selectbox("Elige una opción de búsqueda de hiperparámetros", [""] + list(hyperparam_options.keys()))
 
     # Definir los parámetros dependiendo del modelo seleccionado
-    if model == "KNN Classifier":
-        n_neighbors = st.slider("Número de vecinos", min_value=1, max_value=50, value=5)
-        weights = st.selectbox("Pesos", ["uniform", "distance"])
-        algorithm = st.selectbox("Algoritmo", ["auto", "ball_tree", "kd_tree", "brute"])
-        params = {
-            'n_neighbors': [n_neighbors],
-            'weights': [weights],
-            'algorithm': [algorithm]
-        }
-    elif model == "Logistic Regression":
-        penalty = st.selectbox("Penalización", ["l1", "l2", "elasticnet", "none"])
-        C = st.number_input("C", min_value=0.01, max_value=10.0, value=1.0)
-        solver = st.selectbox("Algoritmo de optimización", ["newton-cg", "lbfgs", "liblinear", "sag", "saga"])
-        params = {
-            'penalty': [penalty],
-            'C': [C],
-            'solver': [solver]
-        }
-    elif model == "Decision Tree Classifier":
-        criterion = st.selectbox("Criterio", ["gini", "entropy"])
-        splitter = st.selectbox("Divisor", ["best", "random"])
-        max_depth = st.number_input("Profundidad máxima", min_value=1, step=1, value=None)
-        params = {
-            'criterion': [criterion],
-            'splitter': [splitter],
-            'max_depth': [max_depth]
-        }
-    elif model == "Bagging Classifier":
-        n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=10)
-        max_samples = st.number_input("Número máximo de muestras", min_value=0.1, max_value=1.0, step=0.1, value=1.0)
-        max_features = st.number_input("Número máximo de características", min_value=0.1, max_value=1.0, step=0.1, value=1.0)
-        params = {
-            'n_estimators': [n_estimators],
-            'max_samples': [max_samples],
-            'max_features': [max_features]
-        }
-    elif model == "Random Forest Classifier":
-        n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=100)
-        criterion = st.selectbox("Criterio", ["gini", "entropy"])
-        max_depth = st.number_input("Profundidad máxima", min_value=1, step=1, value=None)
-        params = {
-            'n_estimators': [n_estimators],
-            'criterion': [criterion],
-            'max_depth': [max_depth]
-        }
-    elif model == "AdaBoost Classifier":
-        n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=50)
-        learning_rate = st.number_input("Tasa de aprendizaje", min_value=0.01, max_value=1.0, step=0.01, value=1.0)
-        algorithm = st.selectbox("Algoritmo", ["SAMME", "SAMME.R"])
-        params = {
-            'n_estimators': [n_estimators],
-            'learning_rate': [learning_rate],
-            'algorithm': [algorithm]
-        }
-    elif model == "Gradient Boost Classifier":
-        learning_rate = st.number_input("Tasa de aprendizaje", min_value=0.01, max_value=1.0, step=0.01, value=0.1)
-        n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=100)
-        max_depth = st.number_input("Profundidad máxima", min_value=1, step=1, value=3)
-        params = {
-            'learning_rate': [learning_rate],
-            'n_estimators': [n_estimators],
-            'max_depth': [max_depth]
-        }
+    if isinstance(model, KNeighborsClassifier):
+        if hyperparam_option == "Grid Search":
+            n_neighbors = st.slider("Número de vecinos", min_value=1, max_value=50, value=5)
+            weights = st.selectbox("Pesos", ["uniform", "distance"])
+            algorithm = st.selectbox("Algoritmo", ["auto", "ball_tree", "kd_tree", "brute"])
+
+            params = {
+                'n_neighbors': [n_neighbors],
+                'weights': [weights],
+                'algorithm': [algorithm]
+            }
+        else:  # Si es Random Search
+            params = {
+                'n_neighbors': [1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+                'weights': ['uniform', 'distance'],
+                'algorithm': ['auto', 'ball_tree', 'kd_tree', 'brute']
+            }
+
+    elif isinstance(model, LogisticRegression):
+        if hyperparam_option == "Grid Search":
+            penalty = st.selectbox("Penalización", ["l1", "l2", "elasticnet", "none"])
+            C = st.number_input("C", min_value=0.01, max_value=10.0, value=1.0)
+            solver = st.selectbox("Algoritmo de optimización", ["newton-cg", "lbfgs", "liblinear", "sag", "saga"])
+
+            params = {
+                'penalty': [penalty],
+                'C': [C],
+                'solver': [solver]
+            }
+        else:  # Si es Random Search
+            params = {
+                'penalty': ['l1', 'l2', 'elasticnet', 'none'],
+                'C': [0.01, 0.1, 1, 10],
+                'solver': ['newton-cg', 'lbfgs', 'liblinear', 'sag', 'saga']
+            }
+
+    elif isinstance(model, BaggingClassifier):
+        if hyperparam_option == "Grid Search":
+            n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=10)
+            max_samples = st.number_input("Número máximo de muestras", min_value=0.1, max_value=1.0, step=0.1, value=1.0)
+            max_features = st.number_input("Número máximo de características", min_value=0.1, max_value=1.0, step=0.1, value=1.0)
+
+            params = {
+                'n_estimators': [n_estimators],
+                'max_samples': [max_samples],
+                'max_features': [max_features]
+            }
+        else:  # Si es Random Search
+            params = {
+                'n_estimators': [10, 50, 100, 200, 300, 400, 500],
+                'max_samples': [0.1, 0.5, 0.7, 0.9, 1.0],
+                'max_features': [0.1, 0.5, 0.7, 0.9, 1.0]
+            }
+
+    elif isinstance(model,RandomForestClassifier):
+        if hyperparam_option == "Grid Search":
+            n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=100)
+            criterion = st.selectbox("Criterio", ["gini", "entropy"])
+            max_depth = st.number_input("Profundidad máxima", min_value=1, step=1, value=None)
+
+            params = {
+                'n_estimators': [n_estimators],
+                'criterion': [criterion],
+                'max_depth': [max_depth]
+            }
+        else:  # Si es Random Search
+            params = {
+                'n_estimators': [10, 50, 100, 200, 300, 400, 500],
+                'criterion': ['gini', 'entropy'],
+                'max_depth': [None, 10, 20, 30, 40, 50]
+            }
+
+    elif isinstance(model,AdaBoostClassifier):
+        if hyperparam_option == "Grid Search":
+            n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=50)
+            learning_rate = st.number_input("Tasa de aprendizaje", min_value=0.01, max_value=1.0, step=0.01, value=1.0)
+            algorithm = st.selectbox("Algoritmo", ["SAMME", "SAMME.R"])
+
+            params = {
+                'n_estimators': [n_estimators],
+                'learning_rate': [learning_rate],
+                'algorithm': [algorithm]
+            }
+        else:  # Si es Random Search
+            params = {
+                'n_estimators': [10, 50, 100, 200, 300, 400, 500],
+                'learning_rate': [0.01, 0.1, 0.5, 1.0],
+                'algorithm': ['SAMME', 'SAMME.R']
+            }
+
+    elif isinstance(model,GradientBoostingClassifier):
+        if hyperparam_option == "Grid Search":    
+            learning_rate = st.number_input("Tasa de aprendizaje", min_value=0.01, max_value=1.0, step=0.01, value=0.1)
+            n_estimators = st.number_input("Número de estimadores", min_value=1, step=1, value=100)
+            max_depth = st.number_input("Profundidad máxima", min_value=1, step=1, value=3)
+
+            params = {
+                'learning_rate': [learning_rate],
+                'n_estimators': [n_estimators],
+                'max_depth': [max_depth]
+            }
+        else:  # Si es Random Search
+            params = {
+                'learning_rate': [0.01, 0.1, 0.5, 1.0],
+                'n_estimators': [10, 50, 100, 200, 300, 400, 500],
+                'max_depth': [3, 5, 10, 20, None]
+            }
+
+
     else:
         st.error("Modelo no válido para la búsqueda de hiperparámetros")
 
     return params, hyperparam_option
+
 
 def choose_hyperparameters_continuous(model):
     # Opciones para la búsqueda de hiperparámetros
@@ -259,7 +312,7 @@ def choose_hyperparameters_continuous(model):
         "Random Search": "random"
     }
     
-    hyperparam_option = st.selectbox("Elige una opción de búsqueda de hiperparámetros", list(hyperparam_options.keys()))
+    hyperparam_option = st.selectbox("Elige una opción de búsqueda de hiperparámetros", [""] + list(hyperparam_options.keys()))
 
     # Definir los parámetros dependiendo del modelo y la opción seleccionada
     if isinstance(model, LinearRegression):
@@ -393,7 +446,7 @@ def choose_hyperparameters_continuous(model):
 
     return params, hyperparam_option
 
-def hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train_discretized, y_train_discretized):
+def hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train):
     # Obtener el objeto de búsqueda de hiperparámetros seleccionado
     if hyperparam_option == "Grid Search":
         hyperparam_search = GridSearchCV
@@ -404,7 +457,7 @@ def hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train
 
     # Realizar la búsqueda de hiperparámetros
     search = hyperparam_search(model, params, cv=cv)
-    search.fit(X_train_discretized, y_train_discretized)
+    search.fit(X_train, y_train)
 
     # Obtener y devolver el mejor modelo
     best_model = search.best_estimator_
@@ -428,31 +481,47 @@ def hyperparameter_search_continuous(model, hyperparam_option, params, cv, X_tra
     return best_model
 
 
-def choose_model_discretos(X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized, data_type):
-    model_option = st.selectbox("Elige un modelo", ["","KNN Clasifier", "Logistic Regression", "Decision Tree Clasifier", "Bagging Classifier", "Random Forest Classifier", "AdaBoost Classifier", "Gradient Boost Classifier"], key="model_selector")
+def choose_model_discrete_discretized(X_train, X_test, y_train, y_test, data_type):
+    model_option = st.selectbox("Elige un modelo", ["","Bagging Classifier", "Random Forest Classifier", "AdaBoost Classifier", "Gradient Boost Classifier"], key="model_selector")
+    model = None  # Inicializar el modelo
+    
+    if model_option == "Bagging Classifier":
+        model = BaggingClassifier(n_estimators=100, max_samples=0.5)
+        BaggingClassifier_model(model, X_train, X_test, y_train, y_test)
+    elif model_option == "Random Forest Classifier":
+        model = RandomForestClassifier(n_estimators=100, max_depth=20)
+        RandomForestClassifier_model(model, X_train, X_test, y_train, y_test)
+    elif model_option == "AdaBoost Classifier":
+        model = AdaBoostClassifier(n_estimators=100)
+        AdaBoostClassifier_model(model, X_train, X_test, y_train, y_test)
+    elif model_option == "Gradient Boost Classifier":
+        model = GradientBoostingClassifier(max_depth=20, n_estimators=100)
+        GradientBoostingClassifier_model(model, X_train, X_test, y_train, y_test)
+        
+    return model  # Devolver el modelo
+
+def choose_model_discrete_one_hot_encoded(X_train, X_test, y_train, y_test, data_type):
+    model_option = st.selectbox("Elige un modelo", ["","KNN Clasifier", "Logistic Regression", "Bagging Classifier", "Random Forest Classifier", "AdaBoost Classifier", "Gradient Boost Classifier"], key="model_selector")
     model = None  # Inicializar el modelo
     
     if model_option == "KNN Clasifier":
         model = KNeighborsClassifier(n_neighbors=3)
-        KNeighborsClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
+        KNeighborsClassifier_model(model, X_train, X_test, y_train, y_test)
     elif model_option == "Logistic Regression":
         model = LogisticRegression()
-        LogisticRegression_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
-    elif model_option == "Decision Tree":
-        model = DecisionTreeClassifier(max_depth=10)
-        DecisionTreeClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
+        LogisticRegression_model(model, X_train, X_test, y_train, y_test)
     elif model_option == "Bagging Classifier":
         model = BaggingClassifier(n_estimators=100, max_samples=0.5)
-        BaggingClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
+        BaggingClassifier_model(model, X_train, X_test, y_train, y_test)
     elif model_option == "Random Forest Classifier":
         model = RandomForestClassifier(n_estimators=100, max_depth=20)
-        RandomForestClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
+        RandomForestClassifier_model(model, X_train, X_test, y_train, y_test)
     elif model_option == "AdaBoost Classifier":
         model = AdaBoostClassifier(n_estimators=100)
-        AdaBoostClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
+        AdaBoostClassifier_model(model, X_train, X_test, y_train, y_test)
     elif model_option == "Gradient Boost Classifier":
         model = GradientBoostingClassifier(max_depth=20, n_estimators=100)
-        GradientBoostingClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized)
+        GradientBoostingClassifier_model(model, X_train, X_test, y_train, y_test)
         
     return model  # Devolver el modelo
 
@@ -485,14 +554,14 @@ def choose_model_continuos(X_train_norm, X_test_norm, y_train, y_test, data_type
     return model  # Devolver el modelo
 
 # Function to train and evaluate the KNeighborsClassifier model with discretized data
-def KNeighborsClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
+def KNeighborsClassifier_model(model, X_train, X_test, y_train, y_test):
     # Encode the categorical features and target
     le = LabelEncoder()
     
-    X_train_encoded = X_train_discretized.apply(le.fit_transform)
-    X_test_encoded = X_test_discretized.apply(le.transform)
-    y_train_encoded = le.fit_transform(y_train_discretized)
-    y_test_encoded = le.transform(y_test_discretized)
+    X_train_encoded = X_train.apply(le.fit_transform)
+    X_test_encoded = X_test.apply(le.transform)
+    y_train_encoded = le.fit_transform(y_train)
+    y_test_encoded = le.transform(y_test)
     
     model.fit(X_train_encoded, y_train_encoded)
     y_pred = model.predict(X_test_encoded)
@@ -533,14 +602,14 @@ def KNeighborsRegressor_model(model, X_train, X_test, y_train, y_test):
     st.pyplot(fig)
 
 # Función para entrenar y evaluar el LogisticRegression model with discretized data
-def LogisticRegression_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
+def LogisticRegression_model(model, X_train, X_test, y_train, y_test):
     # Encode the categorical features and target
     le = LabelEncoder()
     
-    X_train_encoded = X_train_discretized.apply(le.fit_transform)
-    X_test_encoded = X_test_discretized.apply(le.transform)
-    y_train_encoded = le.fit_transform(y_train_discretized)
-    y_test_encoded = le.transform(y_test_discretized)
+    X_train_encoded = X_train.apply(le.fit_transform)
+    X_test_encoded = X_test.apply(le.transform)
+    y_train_encoded = le.fit_transform(y_train)
+    y_test_encoded = le.transform(y_test)
     
     model.fit(X_train_encoded, y_train_encoded)
     y_pred = model.predict(X_test_encoded)
@@ -580,34 +649,7 @@ def LinearRegression_model(model, X_train_norm, X_test_norm, y_train, y_test):
 
     st.pyplot(fig)
 
-# Función para entrenar y evaluar el DecisionTreeClassifier_model con datos discretizados
-def DecisionTreeClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
-    # Encode the categorical features and target
-    le = LabelEncoder()
-    
-    X_train_encoded = X_train_discretized.apply(le.fit_transform)
-    X_test_encoded = X_test_discretized.apply(le.transform)
-    y_train_encoded = le.fit_transform(y_train_discretized)
-    y_test_encoded = le.transform(y_test_discretized)
-    
-    model.fit(X_train_encoded, y_train_encoded)
-    y_pred = model.predict(X_test_encoded)
-    
-    st.write("Matriz de Confusión: ")
-    cm = confusion_matrix(y_test_encoded, y_pred)
-    st.write(cm)
-    
-    st.write("Reporte de Clasificación: ")
-    cr = classification_report(y_test_encoded, y_pred)
-    st.text(cr)
-    
-    st.write("Precisión del modelo: ", accuracy_score(y_test_encoded, y_pred))
-    
-    fig, ax = plt.subplots()
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
-    plt.xlabel("Predicted")
-    plt.ylabel("True")
-    st.pyplot(fig)
+
 
 # Función para entrenar y evaluar el DecisionTreeRegressor_model NORMALIZE
 def DecisionTreeRegressor_model(model, X_train_norm, X_test_norm, y_train, y_test):
@@ -629,19 +671,19 @@ def DecisionTreeRegressor_model(model, X_train_norm, X_test_norm, y_train, y_tes
     st.pyplot(fig)
 
 # Function to train and evaluate the BaggingClassifier model with discretized data
-def BaggingClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
-    model.fit(X_train_discretized, y_train_discretized)
-    y_pred = model.predict(X_test_discretized)
+def BaggingClassifier_model(model, X_train, X_test, y_train, y_test):
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
     
     st.write("Matriz de Confusión: ")
-    cm = confusion_matrix(y_test_discretized, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
     st.write(cm)
     
     st.write("Reporte de Clasificación: ")
-    cr = classification_report(y_test_discretized, y_pred)
+    cr = classification_report(y_test, y_pred)
     st.text(cr)
     
-    st.write("Precisión del modelo: ", accuracy_score(y_test_discretized, y_pred))
+    st.write("Precisión del modelo: ", accuracy_score(y_test, y_pred))
     
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
@@ -669,19 +711,19 @@ def BaggingRegressor_model(model, X_train_norm, X_test_norm, y_train, y_test):
     st.pyplot(fig)
 
 # Function to train and evaluate the RandomForestClassifier model with discretized data
-def RandomForestClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
-    model.fit(X_train_discretized, y_train_discretized)
-    y_pred = model.predict(X_test_discretized)
+def RandomForestClassifier_model(model, X_train, X_test, y_train, y_test):
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
     
     st.write("Matriz de Confusión: ")
-    cm = confusion_matrix(y_test_discretized, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
     st.write(cm)
     
     st.write("Reporte de Clasificación: ")
-    cr = classification_report(y_test_discretized, y_pred)
+    cr = classification_report(y_test, y_pred)
     st.text(cr)
     
-    st.write("Precisión del modelo: ", accuracy_score(y_test_discretized, y_pred))
+    st.write("Precisión del modelo: ", accuracy_score(y_test, y_pred))
     
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
@@ -709,19 +751,19 @@ def RandomForestRegressor_model(model, X_train_norm, X_test_norm, y_train, y_tes
     st.pyplot(fig)
 
 # Function to train and evaluate the AdaBoostClassifier model with discretized data
-def AdaBoostClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
-    model.fit(X_train_discretized, y_train_discretized)
-    y_pred = model.predict(X_test_discretized)
+def AdaBoostClassifier_model(model, X_train, X_test, y_train, y_test):
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
     
     st.write("Matriz de Confusión: ")
-    cm = confusion_matrix(y_test_discretized, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
     st.write(cm)
     
     st.write("Reporte de Clasificación: ")
-    cr = classification_report(y_test_discretized, y_pred)
+    cr = classification_report(y_test, y_pred)
     st.text(cr)
     
-    st.write("Precisión del modelo: ", accuracy_score(y_test_discretized, y_pred))
+    st.write("Precisión del modelo: ", accuracy_score(y_test, y_pred))
     
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
@@ -749,19 +791,19 @@ def AdaBoostRegressor_model(model, X_train_norm, X_test_norm, y_train, y_test):
     st.pyplot(fig)
 
 # Function to train and evaluate the GradientBoostingClassifier model with discretized data
-def GradientBoostingClassifier_model(model, X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized):
-    model.fit(X_train_discretized, y_train_discretized)
-    y_pred = model.predict(X_test_discretized)
+def GradientBoostingClassifier_model(model, X_train, X_test, y_train, y_test):
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
     
     st.write("Matriz de Confusión: ")
-    cm = confusion_matrix(y_test_discretized, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
     st.write(cm)
     
     st.write("Reporte de Clasificación: ")
-    cr = classification_report(y_test_discretized, y_pred)
+    cr = classification_report(y_test, y_pred)
     st.text(cr)
     
-    st.write("Precisión del modelo: ", accuracy_score(y_test_discretized, y_pred))
+    st.write("Precisión del modelo: ", accuracy_score(y_test, y_pred))
     
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
@@ -789,58 +831,53 @@ def GradientBoostingRegressor_model(model, X_train_norm, X_test_norm, y_train, y
     st.pyplot(fig)
 
 
-# Función para graficar datos
-def plot_data(df):
-    # Asegúrate de que la columna 'date' esté en formato de fecha
-    df['date'] = pd.to_datetime(df['date'])
-    
-    # Seleccionar las columnas a graficar
-    columns_to_plot = df.columns.difference(['date', 'TL_BASED_ISE'])
-    
-    # Definir el número de columnas para la cuadrícula
-    num_columns = 2  # Cambiar este valor si deseas más o menos columnas en la cuadrícula
-    cols = st.columns(num_columns)
-    
-    for i, column in enumerate(columns_to_plot):
-        fig, ax = plt.subplots()
-        ax.plot(df['date'], df[column], label=column)
-        
-        # Etiquetas y leyenda
-        ax.set_xlabel('Date')
-        ax.set_ylabel('Value')
-        ax.set_title(column)
-        ax.legend()
-        
-        # Mostrar gráfico en la columna correspondiente
-        cols[i % num_columns].pyplot(fig)
-
+# Inicio de la aplicacion
 st.title("NOSTRADAMUS")
 
 df = load_data()
 
+
 if df is not None:
-    plot_data(df)
-    df = clean_data(df)
+
+    data_type = ask_data_type()
+
+    df = clean_data(df)    
+    feature_selection(df)
+
     target_column = select_target_column(df)
 
     if target_column != "":
-        data_type = ask_data_type()
 
         if data_type == "Discretos":
-            df_discretized = discretizing_data(df)
-            features_discretized, target_discretized = target_features_discretized(df_discretized, target_column)
-            X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized = split_data_discretized(features_discretized, target_discretized)
-            features, target = target_features(df, target_column)
-              
-            if not X_train_discretized.empty and not X_test_discretized.empty:
-                model = choose_model_discretos(X_train_discretized, X_test_discretized, y_train_discretized, y_test_discretized, data_type)
+            option = ask_discretization_or_one_hot_encoding()
+            if option == "Discretizar":
+                df_discretized = discretizing_data(df)
+                features, target = target_features(df_discretized, target_column)
+                X_train, X_test, y_train, y_test = split_data(features, target)
+                model = choose_model_discrete_discretized(X_train, X_test, y_train, y_test, data_type)
+
                 if model is not None:
                     cv_method = select_cv_method_discrete()
-                    scores, cv = cross_validation_discrete(model, X_train_discretized, y_train_discretized, cv_method)
+                    scores, cv = cross_validation_discrete(model, X_train, y_train, cv_method)
                     params, hyperparam_option = choose_hyperparameters_discrete(model)
 
-                    if params is not None:   
-                        best_model = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train_discretized, y_train_discretized)
+                    if hyperparam_option != "":   
+                        best_model = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train)
+                        st.write(best_model)
+
+            elif option == "One-Hot Encoding":
+                df_encoded = one_hot_encoder(df)
+                features, target = target_features(df_encoded, target_column)
+                X_train, X_test, y_train, y_test = split_data(features, target)
+                model = choose_model_discrete_one_hot_encoded(X_train, X_test, y_train, y_test, data_type)
+
+                if model is not None:
+                    cv_method = select_cv_method_discrete()
+                    scores, cv = cross_validation_discrete(model, X_train, y_train, cv_method)
+                    params, hyperparam_option = choose_hyperparameters_discrete(model)
+
+                    if hyperparam_option != "":   
+                        best_model = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train)
                         st.write(best_model)
         
         elif data_type == "Continuos":
@@ -855,6 +892,6 @@ if df is not None:
                     scores, cv = cross_validation_continuous(model, X_train_norm, y_train, cv_method)
                     params, hyperparam_option = choose_hyperparameters_continuous(model)
 
-                    if params is not None:   
+                    if hyperparam_option != "":   
                         best_model = hyperparameter_search_continuous(model, hyperparam_option, params, cv, X_train_norm, y_train)
                         st.write(best_model)
