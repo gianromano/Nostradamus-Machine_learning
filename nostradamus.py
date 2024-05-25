@@ -42,8 +42,6 @@ def clean_data(df):
     st.write("Columnas disponibles:")
     selected_columns = st.multiselect("Selecciona las columnas a eliminar:", [""] +  df.columns.tolist())
     df = df.drop(columns=selected_columns, axis=1)
-    st.write("Descripción de los datos después de eliminar columnas:")
-    st.write(df.describe())
     return df
 
 def select_target_column(df):
@@ -74,6 +72,8 @@ def target_features(df, target_column):
     return features, target 
 
 def feature_selection(df):
+    st.write("Descripción de los datos después de eliminar columnas:")
+    st.write(df.describe())
     corr = np.abs(df.corr())
 
     # Set up mask for triangle representation
@@ -836,14 +836,10 @@ st.title("NOSTRADAMUS")
 
 df = load_data()
 
-
 if df is not None:
 
     data_type = ask_data_type()
-
     df = clean_data(df)    
-    feature_selection(df)
-
     target_column = select_target_column(df)
 
     if target_column != "":
@@ -852,6 +848,7 @@ if df is not None:
             option = ask_discretization_or_one_hot_encoding()
             if option == "Discretizar":
                 df_discretized = discretizing_data(df)
+                feature_selection(df_discretized)
                 features, target = target_features(df_discretized, target_column)
                 X_train, X_test, y_train, y_test = split_data(features, target)
                 model = choose_model_discrete_discretized(X_train, X_test, y_train, y_test, data_type)
@@ -867,6 +864,7 @@ if df is not None:
 
             elif option == "One-Hot Encoding":
                 df_encoded = one_hot_encoder(df)
+                feature_selection(df_encoded)               
                 features, target = target_features(df_encoded, target_column)
                 X_train, X_test, y_train, y_test = split_data(features, target)
                 model = choose_model_discrete_one_hot_encoded(X_train, X_test, y_train, y_test, data_type)
@@ -881,6 +879,7 @@ if df is not None:
                         st.write(best_model)
         
         elif data_type == "Continuos":
+            feature_selection(df)
             features, target = target_features(df, target_column)
             X_train, X_test, y_train, y_test = split_data(features, target)
             X_train_norm, X_test_norm = normalize_data(X_train, X_test)
