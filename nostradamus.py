@@ -29,19 +29,19 @@ def load_data():
     uploaded_file = st.file_uploader("Elige un archivo CSV", type="csv", key="file_uploader")
     if uploaded_file is not None:
         try:
-            df = pd.read_csv(uploaded_file, sep=';', quotechar='"')
+            df_pre = pd.read_csv(uploaded_file, sep=';', quotechar='"')
             st.write("Datos cargados:")
-            st.write(df)
-            return df
+            st.write(df_pre)
+            return df_pre
         except ValueError as e:
             st.error(f"Error al leer el archivo: {e}")
             return None
 
 # Función para limpiar datos
-def clean_data(df):
+def clean_data(df_pre):
     st.write("Columnas disponibles:")
-    selected_columns = st.multiselect("Selecciona las columnas a eliminar:", [""] +  df.columns.tolist())
-    df = df.drop(columns=selected_columns, axis=1)
+    selected_columns = st.multiselect("Selecciona las columnas a eliminar:", df_pre.columns.tolist())
+    df = df_pre.drop(columns=selected_columns, axis=1)
     return df
 
 def select_target_column(df):
@@ -49,7 +49,7 @@ def select_target_column(df):
     return target_column
 
 def ask_discretization_or_one_hot_encoding():
-    option = st.selectbox("Elige método de transformación de datos", ["", "Discretizar", "One-Hot Encoding"])
+    option = st.selectbox("Elige como tratar los datos:", ["", "Discretizar", "One-Hot Encoding"])
     return option
 
 def discretizing_data(df):
@@ -90,12 +90,26 @@ def feature_selection(df):
     st.pyplot(f)
     
 def split_data(features, target):
+    # Dividir los datos en conjuntos de entrenamiento y prueba
     X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.20, random_state=0)
-    return X_train, X_test, y_train, y_test    
+    
+    # Guardar los conjuntos de datos en archivos CSV si se proporciona un path
+
+    X_train.to_csv('X_train.csv', index=False)
+    X_test.to_csv('X_test.csv', index=False)
+    pd.DataFrame(y_train).to_csv('y_train.csv', index=False)
+    pd.DataFrame(y_test).to_csv('y_test.csv', index=False)
+    
+    return X_train, X_test, y_train, y_test  
 
 def ask_data_type():
-    data_type = st.radio("¿Elige el tipo de datos?", ("Discretos", "Continuos"), index=None)
+    st.write("Al elegir Continuos podrás aplicar metodos de normalización y si eliges Discretos podrás realizar: discretización ó one-hot encoding")
+    data_type = st.radio("Elige cómo quieres tratar tus datos:", ("Discretos", "Continuos"), index=None)
     return data_type
+
+def ask_to_normalize():
+    to_normalize = st.radio("¿Neesitas normalizar tus datos?", ("Si", "No"), index=None)
+    return to_normalize
 
 # Función para normalización de valores
 def normalize_data(X_train, X_test):
@@ -131,39 +145,50 @@ def normalize_data(X_train, X_test):
     return X_train_norm, X_test_norm
 
 def select_cv_method_discrete():
-    cv_method = st.selectbox("Selecciona un método de validación cruzada para datos discretos", ["Stratified K-Fold", "Stratified Shuffle Split"])
-    return cv_method
+    cv_method = st.selectbox("Método de Validación Cruzada", ["Stratified K-Fold", "Stratified Shuffle Split"])
+    return cv_method 
 
 def select_cv_method_continuous():
     cv_method = st.selectbox("Selecciona un método de validación cruzada para datos continuos", ["K-Fold", "Shuffle Split"])
     return cv_method
 
 
-def cross_validation_discrete(model, X, y, cv_method):
+def cross_validation_discrete(model, X_train, y_train, cv_method, n_splits, shuffle, test_size, random_state):
+    # Determinar el número de splits basado en el tamaño de la clase menos numerosa
+    min_class_size = min(pd.Series(y_train).value_counts())
+    if n_splits > min_class_size or min_class_size == 1:
+        n_splits = min_class_size if min_class_size > 1 else 2
+        cv_method = "K-Fold"  # Cambiar a K-Fold si el tamaño de la clase menos numerosa es 1
+    
     if cv_method == "Stratified K-Fold":
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
     elif cv_method == "Stratified Shuffle Split":
-        cv = StratifiedShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
-
+        cv = StratifiedShuffleSplit(n_splits=n_splits, test_size=test_size, random_state=random_state)
+    elif cv_method == "K-Fold":
+        cv = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
     else:
         raise ValueError("Método de validación cruzada no válido.")
+    
     scoring = make_scorer(accuracy_score)
-    scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+    scores = cross_val_score(model, X_train, y_train, cv=cv, scoring=scoring)
+    
     return scores, cv
 
-def cross_validation_continuous(model, X, y, cv_method):
+def cross_validation_continuous(model, X, y, cv_method, n_splits=5, shuffle=True, random_state=42, test_size=0.2):
     groups = None  # Inicializa los grupos como None
 
     if cv_method == "K-Fold":
-        cv = KFold(n_splits=5, shuffle=True, random_state=42)
+        cv = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
     elif cv_method == "Shuffle Split":
-        cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
+        cv = ShuffleSplit(n_splits=n_splits, test_size=test_size, random_state=random_state)
+
     # elif cv_method == "Group K-Fold":
     #     groups = np.random.randint(1, 10, size=len(y))  # Ejemplo de grupos aleatorios
     #     cv = GroupKFold(n_splits=5)
     # elif cv_method == "Group Shuffle Split":
     #     groups = np.random.randint(1, 10, size=len(y))  # Ejemplo de grupos aleatorios
     #     cv = GroupShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
+
     else:
         raise ValueError("Método de validación cruzada no válido para datos continuos")
 
@@ -457,7 +482,7 @@ def hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train
 
     # Realizar la búsqueda de hiperparámetros
     search = hyperparam_search(model, params, cv=cv)
-    search.fit(X_train, y_train)
+    search_result = search.fit(X_train, y_train)
 
     # Obtener y devolver el mejor modelo
     best_model = search.best_estimator_
@@ -474,11 +499,11 @@ def hyperparameter_search_continuous(model, hyperparam_option, params, cv, X_tra
 
     # Realizar la búsqueda de hiperparámetros
     search = hyperparam_search(model, params, cv=cv)
-    search.fit(X_train_norm, y_train)
+    search_result = search.fit(X_train_norm, y_train)  # Almacena el resultado de la búsqueda en una variable
 
     # Obtener y devolver el mejor modelo
     best_model = search.best_estimator_
-    return best_model
+    return best_model, search_result
 
 
 def choose_model_discrete_discretized(X_train, X_test, y_train, y_test, data_type):
@@ -556,26 +581,49 @@ def choose_model_continuos(X_train_norm, X_test_norm, y_train, y_test, data_type
 # Function to train and evaluate the KNeighborsClassifier model with discretized data
 def KNeighborsClassifier_model(model, X_train, X_test, y_train, y_test):
     # Encode the categorical features and target
-    le = LabelEncoder()
+    le_features = LabelEncoder()
+    le_target = LabelEncoder()
     
-    X_train_encoded = X_train.apply(le.fit_transform)
-    X_test_encoded = X_test.apply(le.transform)
-    y_train_encoded = le.fit_transform(y_train)
-    y_test_encoded = le.transform(y_test)
+    # Codificar las características (X)
+    X_train_encoded = X_train.apply(le_features.fit_transform)
+    X_test_encoded = X_test.apply(le_features.transform)
     
+    # Codificar el objetivo (y)
+    y_train_encoded = le_target.fit_transform(y_train)
+    y_test_encoded = le_target.transform(y_test)
+
+    # Encontrar etiquetas no vistas en el conjunto de prueba
+    unseen_labels = np.setdiff1d(y_test_encoded, y_train_encoded)
+
+    if len(unseen_labels) > 0:
+        # Filtrar las filas con etiquetas no vistas en y_test
+        mask = np.isin(y_test_encoded, y_train_encoded)
+        X_test_filtered = X_test_encoded[mask]
+        y_test_filtered = y_test_encoded[mask]
+    else:
+        X_test_filtered = X_test_encoded
+        y_test_filtered = y_test_encoded
+
+    # Entrenar el modelo
     model.fit(X_train_encoded, y_train_encoded)
-    y_pred = model.predict(X_test_encoded)
     
+    # Hacer predicciones con los datos filtrados
+    y_pred = model.predict(X_test_filtered)
+    
+    # Mostrar la matriz de confusión
     st.write("Matriz de Confusión: ")
-    cm = confusion_matrix(y_test_encoded, y_pred)
+    cm = confusion_matrix(y_test_filtered, y_pred)
     st.write(cm)
     
+    # Mostrar el reporte de clasificación
     st.write("Reporte de Clasificación: ")
-    cr = classification_report(y_test_encoded, y_pred)
+    cr = classification_report(y_test_filtered, y_pred)
     st.text(cr)
     
-    st.write("Precisión del modelo: ", accuracy_score(y_test_encoded, y_pred))
+    # Mostrar la precisión del modelo
+    st.write("Precisión del modelo: ", accuracy_score(y_test_filtered, y_pred))
     
+    # Graficar la matriz de confusión
     fig, ax = plt.subplots()
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
     plt.xlabel("Predicted")
@@ -584,6 +632,7 @@ def KNeighborsClassifier_model(model, X_train, X_test, y_train, y_test):
 
 # Función para entrenar y evaluar el KNeighborsRegressor_model con métricas y gráficos
 def KNeighborsRegressor_model(model, X_train, X_test, y_train, y_test):
+    
     model.fit(X_train, y_train)
     pred = model.predict(X_test)
 
@@ -648,8 +697,6 @@ def LinearRegression_model(model, X_train_norm, X_test_norm, y_train, y_test):
     ax.set_title('Actual vs Predicted')
 
     st.pyplot(fig)
-
-
 
 # Función para entrenar y evaluar el DecisionTreeRegressor_model NORMALIZE
 def DecisionTreeRegressor_model(model, X_train_norm, X_test_norm, y_train, y_test):
@@ -830,22 +877,45 @@ def GradientBoostingRegressor_model(model, X_train_norm, X_test_norm, y_train, y
 
     st.pyplot(fig)
 
+# def best_model_prediction(best_model, df):
+#     # Entrenar tu modelo con los datos de entrenamiento
+#     best_model.fit(df[['TIME_PERIOD']], df['OBS_VALUE'])
 
+#     datos_prueba = {
+#         'TIME_PERIOD': [2025, 2024, 2023],
+#         'OBS_VALUE': [0, 0, 0]  # Dejar los valores de OBS_VALUE vacíos para predecir
+#     }
+
+#     df_prueba = pd.DataFrame(datos_prueba)
+
+#     # Hacer predicciones para los datos de prueba
+#     predicciones = best_model.predict(df_prueba[['TIME_PERIOD']])
+
+#     # Crear un DataFrame con las predicciones
+#     df_predicciones = pd.DataFrame(predicciones, columns=['Predicciones'])
+
+#     # Combinar los datos de prueba con las predicciones
+#     df_resultado = pd.concat([df_prueba, df_predicciones], axis=1)
+
+#     # Mostrar el resultado
+#     st.write(df_resultado)
+    
 # Inicio de la aplicacion
 st.title("NOSTRADAMUS")
 
 df = load_data()
 
 if df is not None:
-
     data_type = ask_data_type()
     df = clean_data(df)    
     target_column = select_target_column(df)
 
     if target_column != "":
-
+        # Datos discretos
         if data_type == "Discretos":
             option = ask_discretization_or_one_hot_encoding()
+
+            # Discretizacion
             if option == "Discretizar":
                 df_discretized = discretizing_data(df)
                 feature_selection(df_discretized)
@@ -854,43 +924,111 @@ if df is not None:
                 model = choose_model_discrete_discretized(X_train, X_test, y_train, y_test, data_type)
 
                 if model is not None:
+                    st.title("Validación Cruzada Discreta")
                     cv_method = select_cv_method_discrete()
-                    scores, cv = cross_validation_discrete(model, X_train, y_train, cv_method)
-                    params, hyperparam_option = choose_hyperparameters_discrete(model)
 
-                    if hyperparam_option != "":   
-                        best_model = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train)
-                        st.write(best_model)
+                    if cv_method != "":
+                        n_splits = st.number_input("Número de Folds/Splits", min_value=2, max_value=20, value=5)
+                        shuffle = st.checkbox("Mezclar los datos", value=True)
+                        random_state = st.number_input("Semilla Aleatoria", value=42)
+                        test_size = st.slider("Tamaño del Conjunto de Prueba (solo para Stratified Shuffle Split)", min_value=0.1, max_value=0.9, value=0.2)
+                        scores, cv = cross_validation_discrete(model, X_train, y_train, cv_method, n_splits, shuffle, test_size, random_state)
 
+                        # Resultados
+                        if cv != "":
+                            st.write("La validacion cruzada se realiza con los siguientes parámetros:", cv)
+                            st.write("Puntuaciones en cada fold:", scores)
+                            st.write("Media de las puntuaciones:", scores.mean())
+                            st.write("Desviación estándar de las puntuaciones:", scores.std())
+                            params, hyperparam_option = choose_hyperparameters_discrete(model)
+
+                            if hyperparam_option != "":   
+                                best_model, search_result = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train)
+                                st.write("Modelo optimizado:")
+                                st.write(best_model)
+                                st.write("Resultado de la busqueda:")
+                                st.write(search_result)
+                                # if best_model != "":
+                                #     best_model_prediction(best_model, df)
+
+            # One-Encoding
             elif option == "One-Hot Encoding":
-                df_encoded = one_hot_encoder(df)
-                feature_selection(df_encoded)               
-                features, target = target_features(df_encoded, target_column)
-                X_train, X_test, y_train, y_test = split_data(features, target)
+                features, target = target_features(df, target_column)
+                df_encoded = one_hot_encoder(features)
+                # feature_selection(df_encoded)               
+                
+                X_train, X_test, y_train, y_test = split_data(df_encoded, target)
                 model = choose_model_discrete_one_hot_encoded(X_train, X_test, y_train, y_test, data_type)
 
                 if model is not None:
-                    cv_method = select_cv_method_discrete()
-                    scores, cv = cross_validation_discrete(model, X_train, y_train, cv_method)
-                    params, hyperparam_option = choose_hyperparameters_discrete(model)
 
-                    if hyperparam_option != "":   
-                        best_model = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train)
-                        st.write(best_model)
-        
+                    st.title("Validación Cruzada Discreta (One-Hot Encoding)")
+                    cv_method = select_cv_method_discrete()
+
+                    if cv_method != "": 
+                        n_splits = st.number_input("Número de Folds/Splits", min_value=2, max_value=20, value=5)
+                        shuffle = st.checkbox("Mezclar los datos", value=True)
+                        random_state = st.number_input("Semilla Aleatoria", value=42)
+                        test_size = st.slider("Tamaño del Conjunto de Prueba (solo para Stratified Shuffle Split)", min_value=0.1, max_value=0.9, value=0.2)
+
+                        if n_splits != '' and shuffle != '' and test_size != '' and random_state != '':
+                            scores, cv = cross_validation_discrete(model, X_train, y_train, cv_method, n_splits, shuffle, test_size, random_state)
+
+                            if cv != "":
+                                st.write("La validacion cruzada se realiza con los siguientes parámetros:")
+                                st.write(cv)
+                                st.write("Puntuaciones en cada fold:", scores)
+                                st.write("Media de las puntuaciones:", scores.mean())
+                                st.write("Desviación estándar de las puntuaciones:", scores.std())
+                                st.title("Método de Hyperparametrización")
+                                params, hyperparam_option = choose_hyperparameters_discrete(model)
+
+                                if hyperparam_option != "":   
+                                    best_model = hyperparameter_search_discrete(model, hyperparam_option, params, cv, X_train, y_train)
+                                    st.write("Modelo optimizado:", best_model)
+                                    # if best_model != "":
+                                    # best_model_prediction(best_model, df)
+
+        # Datos continuos
         elif data_type == "Continuos":
             feature_selection(df)
             features, target = target_features(df, target_column)
             X_train, X_test, y_train, y_test = split_data(features, target)
-            X_train_norm, X_test_norm = normalize_data(X_train, X_test)
-            
+            to_normalize = ask_to_normalize()
+                
+            if to_normalize == 'Si':
+                X_train_norm, X_test_norm = normalize_data(X_train, X_test)
+            else:
+                X_train_norm = X_train
+                X_test_norm = X_test
+                
             if not X_train_norm.empty and not X_test_norm.empty:
                 model = choose_model_continuos(X_train_norm, X_test_norm, y_train, y_test, data_type)
                 if model is not None:
-                    cv_method = select_cv_method_continuous()
-                    scores, cv = cross_validation_continuous(model, X_train_norm, y_train, cv_method)
-                    params, hyperparam_option = choose_hyperparameters_continuous(model)
 
-                    if hyperparam_option != "":   
-                        best_model = hyperparameter_search_continuous(model, hyperparam_option, params, cv, X_train_norm, y_train)
-                        st.write(best_model)
+                    st.title("Validación Cruzada Continua")
+                    cv_method = select_cv_method_continuous()
+                    if cv_method != "": 
+                        n_splits = st.number_input("Número de Folds/Splits", min_value=2, max_value=20, value=5)
+                        shuffle = st.checkbox("Mezclar los datos", value=True)
+                        random_state = st.number_input("Semilla Aleatoria", value=42)
+                        test_size = st.slider("Tamaño del Conjunto de Prueba (solo para Shuffle Split)", min_value=0.1, max_value=0.9, value=0.2)
+                        scores, cv = cross_validation_continuous(model, X_train_norm, y_train, cv_method, n_splits, shuffle, random_state, test_size)
+
+                        if cv != "":
+                            st.write("La validacion cruzada se realiza con los siguientes parámetros:")
+                            st.write(cv)
+                            st.write("Puntuaciones en cada fold:", scores)
+                            st.write("Media de las puntuaciones:", scores.mean())
+                            st.write("Desviación estándar de las puntuaciones:", scores.std())
+                            st.title("Método de Hyperparametrización")
+                            params, hyperparam_option = choose_hyperparameters_continuous(model)
+
+                            if hyperparam_option != "":   
+                                best_model, search_result = hyperparameter_search_continuous(model, hyperparam_option, params, cv, X_train_norm, y_train)
+                                st.write("Modelo optimizado:")
+                                st.write(best_model)
+                                st.write("Resultado de la busqueda:")
+                                st.write(search_result)
+                                # if best_model != "":
+                                #     best_model_prediction(best_model, df)
